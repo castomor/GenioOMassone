@@ -35,6 +35,7 @@ def read_characters():
     """Legge tutti i personaggi dal file CSV."""
     characters = []
     try:
+        # csv.DictReader legge automaticamente le nuove colonne
         with open(CSV_FILE, mode='r', newline='', encoding='utf-8') as file:
             reader = csv.DictReader(file)
             for row in reader:
@@ -64,13 +65,39 @@ def format_category_name(category_key):
     }
     return mapping.get(category_key, category_key)
 
+def get_bio_explanation(current_char, correct_answer):
+    """Costruisce il messaggio di spiegazione con i dettagli biografici."""
+    bio_genius = current_char.get('Bio genio', '')
+    bio_mason = current_char.get('Bio massone', '')
+    char_name = current_char['Nome']
+    
+    if correct_answer == "COMUNE":
+        return f"**{char_name}** è una **Persona Comune**, proprio come te. (Non ha particolari meriti noti come genio o affiliazioni massoniche)."
+    
+    if correct_answer == "GENIO":
+        # Formato: "Persona x è genio. Precisamente perché [bio genio]"
+        return f"**{char_name}** è un **Genio**. Precisamente perché: **{bio_genius}**."
+    
+    if correct_answer == "MASSONE":
+        # Formato: "Persona x è massone. Precisamente [bio massone]"
+        return f"**{char_name}** è un **Massone**. Precisamente: **{bio_mason}**."
+        
+    if correct_answer == "ENTRAMBI":
+        # Formato: "Persona x è genio e massone. Infatti oltre a [bio genio] è anche [bio massone]"
+        return (
+            f"**{char_name}** è un **Genio e Massone**.\n"
+            f"Infatti, oltre a essere un genio per **{bio_genius}**, è anche massone per il seguente motivo: **{bio_mason}**."
+        )
+        
+    return f"Errore: Categoria '{correct_answer}' non riconosciuta."
+
+
 # --- GESTORI TELEGRAM (HANDLERS) ---
 
 def get_quiz_keyboard():
     """Restituisce la tastiera inline con le opzioni di risposta."""
     keyboard = [
         [
-            # callback_data in italiano MAIUSCOLO per coerenza con il CSV
             InlineKeyboardButton("Genio 🧠", callback_data="GENIO"),
             InlineKeyboardButton("Massone 📐", callback_data="MASSONE")
         ],
@@ -104,7 +131,6 @@ async def start_and_play(update: Update, context):
             f"Indovina la sua vera identità:"
         )
         
-        # Determina la funzione di risposta corretta 
         if update.callback_query:
             await update.callback_query.edit_message_text(
                 message, 
@@ -147,25 +173,24 @@ async def button_callback_handler(update: Update, context):
         await query.edit_message_text("Sessione scaduta. Riprova con /start.")
         return
         
-    # Verifica la risposta (confronta la callback_data con il valore nel CSV)
+    # Verifica la risposta
     correct_answer = current_char['Categoria']
-    char_name = current_char['Nome']
-    
-    # Formattiamo le risposte per il messaggio
-    correct_answer_it = format_category_name(correct_answer)
     user_guess_it = format_category_name(user_guess)
     
+    # 1. Ottiene la spiegazione biografica completa, che è la risposta corretta
+    bio_explanation_full = get_bio_explanation(current_char, correct_answer)
+
+    # 2. Messaggio di ESITO (Corretto/Sbagliato)
     if user_guess == correct_answer:
         result_message = (
-            f"✅ **Corretto!**\n"
-            f"Hai indovinato! **{char_name}** era effettivamente un **{correct_answer_it}**."
+            f"✅ **Corretto!** Hai indovinato!\n\n"
+            f"{bio_explanation_full}"
         )
     else:
         result_message = (
-            f"❌ **Sbagliato!**\n"
-            f"Hai risposto: _{user_guess_it}_\n"
-            f"La risposta corretta era: **{correct_answer_it}**.\n\n"
-            f"Il personaggio era: **{char_name}**."
+            f"❌ **Sbagliato!** Hai risposto: _{user_guess_it}_\n\n"
+            f"La risposta corretta è:\n"
+            f"{bio_explanation_full}"
         )
         
     # Risposta finale e opzione per continuare
@@ -174,7 +199,6 @@ async def button_callback_handler(update: Update, context):
         reply_markup=get_post_guess_keyboard(),
         parse_mode=ParseMode.MARKDOWN
     )
-    # Rimuovi il personaggio dal contesto dopo la risposta
     context.user_data.pop(CURRENT_CHAR_KEY, None)
 
 
@@ -187,18 +211,15 @@ bot = application.bot
 application.add_handler(CommandHandler("start", start_and_play))
 application.add_handler(CallbackQueryHandler(button_callback_handler))
 
-# --- GESTIONE DEGLI EVENTI DI AVVIO/SPEGNIMENTO (CORRETTA) ---
+# --- GESTIONE DEGLI EVENTI DI AVVIO/SPEGNIMENTO ---
 
 @app.on_event("startup")
 async def startup_event():
-    """Eseguito all'avvio del server: inizializza PTB e imposta il Webhook."""
     logger.info("Avvio del server...")
     
-    # 1. Inizializza e avvia l'Application PTB (ESSENZIALE PER I WEBHOOK)
     await application.initialize()
     await application.start()
     
-    # 2. Imposta il Webhook
     full_webhook_url = f"{WEBHOOK_URL_BASE}{WEBHOOK_PATH}"
     logger.info(f"Tentativo di impostare il Webhook su: {full_webhook_url}")
     
@@ -228,7 +249,6 @@ def read_root():
 async def telegram_webhook(request: Request):
     """Endpoint principale che riceve gli aggiornamenti da Telegram."""
     try:
-        # Metodo PTB raccomandato per Webhook: mette l'Update nella coda di elaborazione
         update_json = await request.json()
         await application.update_queue.put(
             Update.de_json(data=update_json, bot=bot)
@@ -239,5 +259,3 @@ async def telegram_webhook(request: Request):
     except Exception as e:
         logger.error(f"Errore nell'elaborazione dell'update: {e}")
         return {"message": "Internal Server Error, but acknowledged"}
-
-# END OF FILE
