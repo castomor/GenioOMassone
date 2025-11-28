@@ -1,10 +1,10 @@
-Nome,Categoria
-Daniele Adamo,GENIO
-Calogero Bufalino,MASSONE
-Giulia Maniscalco,ENTRAMBI
-Chiara Cavalieri,COMUNE
-Nikola Tesla,GENIO
-Giuseppe Garibaldi,MASSONE
-Marie Curie,GENIO
-Alessandro Volta,ENTRAMBI
-Un Cittadino Anonimo,COMUNE
+Nome,Categoria,Bio genio,Bio massone
+Daniele Adamo,GENIO,Inventore del teletrasporto istantaneo,
+Calogero Bufalino,MASSONE,,Raggiunse il 33° grado del Rito Scozzese Antico e Accettato (RSAA).
+Giulia Maniscalco,ENTRAMBI,Contribuì in modo fondamentale alla fisica quantistica,È nota per aver fondato la loggia "Luce Eterna" a Zurigo.
+Chiara Cavalieri,COMUNE,,
+Nikola Tesla,GENIO,Inventore nel campo dell'elettromagnetismo e della corrente alternata,
+Giuseppe Garibaldi,MASSONE,,Fu membro di diverse logge e figura chiave del Risorgimento.
+Marie Curie,GENIO,Prima donna a vincere un Premio Nobel e unica a vincerlo in due campi scientifici diversi,
+Alessandro Volta,ENTRAMBI,Inventore della pila elettrica,Fu affiliato alla loggia di Côme.
+Un Cittadino Anonimo,COMUNE,,
