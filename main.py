@@ -13,7 +13,7 @@ from telegram.constants import ParseMode
 from dotenv import load_dotenv
 
 # --- CONFIGURAZIONE GENERALE ---
-# load_dotenv() # Decommenta per test locale
+# load_dotenv() # Decommenta questa riga se testi in locale usando un file .env
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME") 
@@ -35,7 +35,6 @@ def read_characters():
     """Legge tutti i personaggi dal file CSV."""
     characters = []
     try:
-        # Nota: in un ambiente cloud come Render, questo file deve essere presente nel deploy
         with open(CSV_FILE, mode='r', newline='', encoding='utf-8') as file:
             reader = csv.DictReader(file)
             for row in reader:
@@ -55,18 +54,29 @@ def select_random_character(context):
     context.user_data[CURRENT_CHAR_KEY] = char
     return char
 
+def format_category_name(category_key):
+    """Formatta la chiave interna italiana per la visualizzazione."""
+    mapping = {
+        "GENIO": "Genio",
+        "MASSONE": "Massone",
+        "ENTRAMBI": "Genio e Massone",
+        "COMUNE": "Persona Comune"
+    }
+    return mapping.get(category_key, category_key)
+
 # --- GESTORI TELEGRAM (HANDLERS) ---
 
 def get_quiz_keyboard():
     """Restituisce la tastiera inline con le opzioni di risposta."""
     keyboard = [
         [
-            InlineKeyboardButton("Genio 🧠", callback_data="GENIUS"),
-            InlineKeyboardButton("Massone 📐", callback_data="MASON")
+            # callback_data in italiano MAIUSCOLO per coerenza con il CSV
+            InlineKeyboardButton("Genio 🧠", callback_data="GENIO"),
+            InlineKeyboardButton("Massone 📐", callback_data="MASSONE")
         ],
         [
-            InlineKeyboardButton("Entrambi 👑", callback_data="BOTH"),
-            InlineKeyboardButton("Persona Comune 🚶", callback_data="COMMON")
+            InlineKeyboardButton("Entrambi 👑", callback_data="ENTRAMBI"),
+            InlineKeyboardButton("Persona Comune 🚶", callback_data="COMUNE")
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -94,7 +104,7 @@ async def start_and_play(update: Update, context):
             f"Indovina la sua vera identità:"
         )
         
-        # Determina la funzione di risposta corretta (edit_message_text per i callback, reply_text altrimenti)
+        # Determina la funzione di risposta corretta 
         if update.callback_query:
             await update.callback_query.edit_message_text(
                 message, 
@@ -125,11 +135,10 @@ async def button_callback_handler(update: Update, context):
     
     if action == "STOP_GAME":
         await query.edit_message_text("Grazie per aver giocato! Ciao! 👋")
-        # Rimuovi i dati dell'utente quando chiude
         context.user_data.pop(CURRENT_CHAR_KEY, None)
         return
         
-    # --- Gestione della Risposta al Quiz (GENIUS, MASON, BOTH, COMMON) ---
+    # --- Gestione della Risposta al Quiz ---
     user_guess = action
     
     current_char = context.user_data.get(CURRENT_CHAR_KEY)
@@ -138,20 +147,25 @@ async def button_callback_handler(update: Update, context):
         await query.edit_message_text("Sessione scaduta. Riprova con /start.")
         return
         
-    # Verifica la risposta
+    # Verifica la risposta (confronta la callback_data con il valore nel CSV)
     correct_answer = current_char['Categoria']
     char_name = current_char['Nome']
+    
+    # Formattiamo le risposte per il messaggio
+    correct_answer_it = format_category_name(correct_answer)
+    user_guess_it = format_category_name(user_guess)
     
     if user_guess == correct_answer:
         result_message = (
             f"✅ **Corretto!**\n"
-            f"Hai indovinato! **{char_name}** era effettivamente un **{correct_answer.capitalize()}**."
+            f"Hai indovinato! **{char_name}** era effettivamente un **{correct_answer_it}**."
         )
     else:
         result_message = (
             f"❌ **Sbagliato!**\n"
-            f"Hai risposto: _{user_guess.capitalize()}_\n"
-            f"La risposta corretta era: **{correct_answer.capitalize()}**."
+            f"Hai risposto: _{user_guess_it}_\n"
+            f"La risposta corretta era: **{correct_answer_it}**.\n\n"
+            f"Il personaggio era: **{char_name}**."
         )
         
     # Risposta finale e opzione per continuare
@@ -167,7 +181,6 @@ async def button_callback_handler(update: Update, context):
 # --- CONFIGURAZIONE FASTAPI E PTB ---
 
 app = FastAPI()
-# L'Application gestisce la logica di Telegram
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 bot = application.bot
 
@@ -181,7 +194,7 @@ async def startup_event():
     """Eseguito all'avvio del server: inizializza PTB e imposta il Webhook."""
     logger.info("Avvio del server...")
     
-    # 1. Inizializza e avvia l'Application PTB (CORREZIONE ERRORE PRECEDENTE)
+    # 1. Inizializza e avvia l'Application PTB (ESSENZIALE PER I WEBHOOK)
     await application.initialize()
     await application.start()
     
@@ -200,7 +213,7 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Eseguito alla chiusura del server: spegne l'Application PTB (Importante!)."""
+    """Eseguito alla chiusura del server: spegne l'Application PTB."""
     logger.info("Spegnimento dell'Application PTB.")
     await application.stop()
 
@@ -213,7 +226,7 @@ def read_root():
 
 @app.post(WEBHOOK_PATH)
 async def telegram_webhook(request: Request):
-    """Endpoint principale che riceve gli aggiornamenti da Telegram (CORRETTO)."""
+    """Endpoint principale che riceve gli aggiornamenti da Telegram."""
     try:
         # Metodo PTB raccomandato per Webhook: mette l'Update nella coda di elaborazione
         update_json = await request.json()
@@ -225,5 +238,6 @@ async def telegram_webhook(request: Request):
         
     except Exception as e:
         logger.error(f"Errore nell'elaborazione dell'update: {e}")
-        # Restituire sempre 200 OK a Telegram
         return {"message": "Internal Server Error, but acknowledged"}
+
+# END OF FILE
