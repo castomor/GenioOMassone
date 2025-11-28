@@ -1,4 +1,5 @@
 fastapi
 uvicorn
 python-telegram-bot
-# Aggiungeremo le dipendenze per il database in seguito (es. sqlalchemy, psycopg2, etc.)
+sqlalchemy
+python-dotenv
