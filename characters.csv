@@ -1,7 +1,10 @@
-Nome,Categoria,Ultima_Proposta
-Daniele Adamo,GENIUS,
-Calogero Bufalino,MASON,
-Giulia Maniscalco,BOTH,
-Chiara Cavalieri,COMMON,
-Nikola Tesla,GENIUS,
-Giuseppe Garibaldi,MASON,
+Nome,Categoria
+Daniele Adamo,GENIUS
+Calogero Bufalino,MASON
+Giulia Maniscalco,BOTH
+Chiara Cavalieri,COMMON
+Nikola Tesla,GENIUS
+Giuseppe Garibaldi,MASON
+Marie Curie,GENIUS
+Alessandro Volta,BOTH
+Un Cittadino Anonimo,COMMON
