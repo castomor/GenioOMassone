@@ -57,12 +57,13 @@ def select_random_character(context):
 
 def format_category_name(category_key):
     """Mappa le chiavi interne (COMUNE, GENIO) in testo formattato in italiano per l'utente."""
-    # Le chiavi in input devono essere pulite (e.g., "COMUNE")
     mapping = {
         "GENIO": "Genio",
         "MASSONE": "Massone",
         "ENTRAMBI": "Genio e Massone",
-        "COMUNE": "Persona Comune"
+        "COMUNE": "Persona Comune", # Chiave pulita
+        # Aggiungo la traduzione per la chiave CSV malformata, anche se la patch la corregge prima
+        "PERSONA COMUNE": "Persona Comune" 
     }
     # Assicura che la chiave sia in maiuscolo prima della traduzione
     return mapping.get(category_key.strip().upper(), category_key)
@@ -83,7 +84,7 @@ def get_quiz_keyboard():
         ],
         [
             InlineKeyboardButton("Entrambi 👑", callback_data="ENTRAMBI"),
-            # La callback_data è la chiave interna pulita che corrisponde al CSV
+            # La callback_data è la chiave interna pulita
             InlineKeyboardButton("Persona Comune 🚶", callback_data="COMUNE") 
         ]
     ]
@@ -154,13 +155,19 @@ async def button_callback_handler(update: Update, context):
         return
         
     # **LOGICA DI CONFRONTO ROBUSTA:**
-    # Normalizziamo la risposta del pulsante (COMUNE, GENIO, ecc.)
+    # 1. Normalizziamo la risposta del pulsante (COMUNE, GENIO, ecc.)
     user_guess = action.strip().upper() 
     
-    # Normalizziamo la Categoria dal CSV (per eliminare spazi o formattazioni errate)
+    # 2. Normalizziamo la Categoria dal CSV (per eliminare spazi o formattazioni errate)
     correct_answer = str(current_char['Categoria']).strip().upper()
     
-    # Confronto
+    # **PATCH CRITICA PER RISOLVERE IL BUG "PERSONA COMUNE" NEL CSV**
+    if correct_answer == "PERSONA COMUNE":
+        logger.warning("PATCH ATTIVATA: Rilevata Categoria malformata 'PERSONA COMUNE' nel CSV. Forzata a 'COMUNE' per il confronto.")
+        correct_answer = "COMUNE" 
+    # -------------------------------------------------------------------
+    
+    # Confronto (ora avviene tra due chiavi pulite, e.g., 'COMUNE' e 'COMUNE')
     esito_corretto = (user_guess == correct_answer)
 
     # Variabili per i messaggi di output
@@ -191,6 +198,7 @@ async def button_callback_handler(update: Update, context):
 
 
 # --- CONFIGURAZIONE FASTAPI E PTB ---
+# [Questa parte rimane invariata]
 
 app = FastAPI()
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
@@ -198,8 +206,6 @@ bot = application.bot
 
 application.add_handler(CommandHandler("start", start_and_play))
 application.add_handler(CallbackQueryHandler(button_callback_handler))
-
-# --- GESTIONE DEGLI EVENTI DI AVVIO/SPEGNIMENTO ---
 
 @app.on_event("startup")
 async def startup_event():
