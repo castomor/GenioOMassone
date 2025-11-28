@@ -35,7 +35,7 @@ def read_characters():
     """Legge tutti i personaggi dal file CSV."""
     characters = []
     try:
-        # csv.DictReader legge automaticamente le nuove colonne
+        # csv.DictReader leggerà le colonne Nome, Categoria, Bio
         with open(CSV_FILE, mode='r', newline='', encoding='utf-8') as file:
             reader = csv.DictReader(file)
             for row in reader:
@@ -56,40 +56,20 @@ def select_random_character(context):
     return char
 
 def format_category_name(category_key):
-    """Formatta la chiave interna italiana per la visualizzazione."""
+    """Formatta la chiave interna italiana per la visualizzazione nei messaggi di errore."""
     mapping = {
         "GENIO": "Genio",
         "MASSONE": "Massone",
         "ENTRAMBI": "Genio e Massone",
         "COMUNE": "Persona Comune"
     }
+    # Restituisce il valore formattato, o la chiave se non trovata
     return mapping.get(category_key, category_key)
 
-def get_bio_explanation(current_char, correct_answer):
-    """Costruisce il messaggio di spiegazione con i dettagli biografici."""
-    bio_genius = current_char.get('Bio genio', '')
-    bio_mason = current_char.get('Bio massone', '')
-    char_name = current_char['Nome']
-    
-    if correct_answer == "COMUNE":
-        return f"**{char_name}** è una **Persona Comune**, proprio come te. (Non ha particolari meriti noti come genio o affiliazioni massoniche)."
-    
-    if correct_answer == "GENIO":
-        # Formato: "Persona x è genio. Precisamente perché [bio genio]"
-        return f"**{char_name}** è un **Genio**. Precisamente perché: **{bio_genius}**."
-    
-    if correct_answer == "MASSONE":
-        # Formato: "Persona x è massone. Precisamente [bio massone]"
-        return f"**{char_name}** è un **Massone**. Precisamente: **{bio_mason}**."
-        
-    if correct_answer == "ENTRAMBI":
-        # Formato: "Persona x è genio e massone. Infatti oltre a [bio genio] è anche [bio massone]"
-        return (
-            f"**{char_name}** è un **Genio e Massone**.\n"
-            f"Infatti, oltre a essere un genio per **{bio_genius}**, è anche massone per il seguente motivo: **{bio_mason}**."
-        )
-        
-    return f"Errore: Categoria '{correct_answer}' non riconosciuta."
+# FUNZIONE AGGIORNATA: Legge direttamente il campo Bio completo dal CSV
+def get_bio_explanation(current_char):
+    """Restituisce il contenuto del campo 'Bio' che contiene già la spiegazione completa e formattata."""
+    return current_char.get('Bio', '**Errore**: Informazioni biografiche non disponibili.')
 
 
 # --- GESTORI TELEGRAM (HANDLERS) ---
@@ -177,8 +157,8 @@ async def button_callback_handler(update: Update, context):
     correct_answer = current_char['Categoria']
     user_guess_it = format_category_name(user_guess)
     
-    # 1. Ottiene la spiegazione biografica completa, che è la risposta corretta
-    bio_explanation_full = get_bio_explanation(current_char, correct_answer)
+    # 1. Ottiene la spiegazione biografica completa DALLA COLONNA UNICA "Bio"
+    bio_explanation_full = get_bio_explanation(current_char)
 
     # 2. Messaggio di ESITO (Corretto/Sbagliato)
     if user_guess == correct_answer:
@@ -189,7 +169,7 @@ async def button_callback_handler(update: Update, context):
     else:
         result_message = (
             f"❌ **Sbagliato!** Hai risposto: _{user_guess_it}_\n\n"
-            f"La risposta corretta è:\n"
+            f"La risposta corretta ({format_category_name(correct_answer)}) è:\n"
             f"{bio_explanation_full}"
         )
         
