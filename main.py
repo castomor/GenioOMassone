@@ -1,127 +1,67 @@
 import os
 import logging
-from datetime import date
+import csv
+import random
 
 # Import per FastAPI
-from fastapi import FastAPI, Request, HTTPException
-import uvicorn
-
+from fastapi import FastAPI, Request
 # Import per Telegram Bot
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from telegram.constants import ParseMode
-
-# Import per SQLAlchemy (Database)
-from sqlalchemy import create_engine, Column, Integer, String, Date
-from sqlalchemy.orm import sessionmaker, declarative_base
-
-# Per la lettura delle variabili d'ambiente (utile per test locali)
+# Per la lettura delle variabili d'ambiente
 from dotenv import load_dotenv
 
-# --- 0. CONFIGURAZIONE GENERALE ---
-# Carica .env se presente (utile in locale, Render usa le sue variabili)
-# load_dotenv() 
+# --- CONFIGURAZIONE GENERALE ---
+# load_dotenv() # Decommenta per test locale
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-# Il nome host che Render assegna al tuo servizio (es. mybot.onrender.com)
+# RENDER_EXTERNAL_HOSTNAME è ancora necessario per l'impostazione del webhook
 RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME") 
 
 if not TELEGRAM_BOT_TOKEN or not RENDER_EXTERNAL_HOSTNAME:
-    # Solleva un errore se le variabili cruciali non sono state impostate
     raise ValueError("Variabili d'ambiente TELEGRAM_BOT_TOKEN o RENDER_EXTERNAL_HOSTNAME mancanti.")
 
 WEBHOOK_URL_BASE = f"https://{RENDER_EXTERNAL_HOSTNAME}"
 WEBHOOK_PATH = "/webhook"
+CSV_FILE = "characters.csv" 
+# Chiave per memorizzare il personaggio corrente nello stato del bot (context.user_data)
+CURRENT_CHAR_KEY = 'current_char'
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- 1. CONFIGURAZIONE DATABASE (SQLAlchemy) ---
+# --- FUNZIONI DI GIOCO E GESTIONE CSV ---
 
-# Usa un file SQLite per semplicità. In produzione su Render, usa PostgreSQL!
-# Esempio per PostgreSQL (Render): DATABASE_URL = os.getenv("DATABASE_URL")
-DATABASE_URL = "sqlite:///./game_data.db" 
+def read_characters():
+    """Legge tutti i personaggi dal file CSV."""
+    characters = []
+    try:
+        with open(CSV_FILE, mode='r', newline='', encoding='utf-8') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                characters.append(row)
+    except FileNotFoundError:
+        logger.error(f"File {CSV_FILE} non trovato. Assicurati che esista!")
+        return []
+    return characters
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-# Modello dei dati
-class Character(Base):
-    """Definisce la tabella dei personaggi."""
-    __tablename__ = "characters"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)
-    category = Column(String)  # 'GENIUS', 'MASON', 'BOTH', 'COMMON'
-    last_proposed_date = Column(Date, nullable=True)
-
-class GameStatus(Base):
-    """Traccia lo stato attuale del gioco (personaggio del giorno)."""
-    __tablename__ = "game_status"
+def select_random_character(context):
+    """Seleziona un personaggio casuale dalla lista e lo salva nel contesto utente."""
+    characters = read_characters()
+    if not characters:
+        return None
     
-    id = Column(Integer, primary_key=True)
-    current_char_id = Column(Integer, unique=True, nullable=False)
-    game_date = Column(Date, unique=True, nullable=False)
-
-# Esempio di dati iniziali
-INITIAL_CHARACTERS = [
-    ("Leonardo da Vinci", "GENIUS"),
-    ("Giuseppe Garibaldi", "MASON"),
-    ("Wolfgang Amadeus Mozart", "BOTH"),
-    ("Una Persona Qualunque", "COMMON"),
-    ("Galileo Galilei", "GENIUS"),
-    ("Lord Byron", "MASON"),
-]
-
-# --- 2. FUNZIONI DI GIOCO E DB ---
-
-def init_db(session):
-    """Crea le tabelle e inserisce i dati iniziali se non esistono."""
-    Base.metadata.create_all(bind=engine)
+    # Sceglie un personaggio a caso
+    char = random.choice(characters)
     
-    # Aggiungi personaggi se la tabella è vuota
-    if session.query(Character).count() == 0:
-        logger.info("Inizializzazione dei personaggi nel database.")
-        for name, category in INITIAL_CHARACTERS:
-            session.add(Character(name=name, category=category))
-        session.commit()
-    
-    session.close()
+    # Salva il personaggio corrente nel contesto dell'utente (utile se l'utente risponde
+    # con un messaggio invece che con un pulsante, ma lo usiamo per tracciare la risposta corretta)
+    context.user_data[CURRENT_CHAR_KEY] = char
+    return char
 
-def select_new_character(session):
-    """Seleziona un nuovo personaggio da proporre, dando priorità ai meno recenti."""
-    today = date.today()
-    
-    # 1. Controlla se il gioco è già iniziato oggi
-    current_status = session.query(GameStatus).filter(GameStatus.game_date == today).first()
-    
-    if current_status:
-        # Già proposto oggi, recupera il personaggio
-        char = session.query(Character).filter(Character.id == current_status.current_char_id).first()
-        return char
+# --- GESTORI TELEGRAM (HANDLERS) ---
 
-    # 2. Seleziona il personaggio (quello proposto meno di recente)
-    # Ordina per data, con NULL (mai proposti) per primi
-    char_to_propose = session.query(Character).order_by(Character.last_proposed_date.asc()).first()
-    
-    if char_to_propose:
-        # 3. Aggiorna il DB
-        char_to_propose.last_proposed_date = today
-        
-        # Aggiorna lo stato del gioco
-        # Prima rimuovi il vecchio stato (per mantenere la tabella GameStatus pulita)
-        session.query(GameStatus).delete() 
-        session.add(GameStatus(current_char_id=char_to_propose.id, game_date=today))
-        
-        session.commit()
-        return char_to_propose
-        
-    return None # Nessun personaggio disponibile
-
-# --- 3. GESTORI TELEGRAM (HANDLERS) ---
-
-# Helper per creare i pulsanti di risposta
 def get_quiz_keyboard():
     """Restituisce la tastiera inline con le opzioni di risposta."""
     keyboard = [
@@ -134,111 +74,122 @@ def get_quiz_keyboard():
             InlineKeyboardButton("Persona Comune 🚶", callback_data="COMMON")
         ]
     ]
+    # Usiamo un callback per distinguere le risposte di gioco dagli altri pulsanti
     return InlineKeyboardMarkup(keyboard)
 
-async def start_command(update: Update, context):
-    """Gestisce il comando /start e avvia il quiz giornaliero."""
-    session = SessionLocal()
-    try:
-        current_char = select_new_character(session)
+def get_post_guess_keyboard():
+    """Restituisce la tastiera inline per continuare o chiudere il gioco."""
+    keyboard = [
+        [
+            InlineKeyboardButton("Un altro personaggio! 👉", callback_data="PLAY_AGAIN"),
+        ],
+        [
+            InlineKeyboardButton("Mi fermo qui 👋", callback_data="STOP_GAME")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def start_and_play(update: Update, context):
+    """Funzione unificata per /start e per il pulsante 'Gioca Ancora'."""
+    current_char = select_random_character(context)
+    
+    if current_char:
+        message = (
+            f"Il personaggio scelto a caso è: **{current_char['Nome']}**\n\n"
+            f"Indovina la sua vera identità:"
+        )
         
-        if current_char:
-            message = (
-                f"🎉 **Benvenuto nel quiz del giorno!**\n\n"
-                f"Il personaggio di oggi è: **{current_char.name}**\n\n"
-                f"Indovina la sua vera identità:"
-            )
-            
-            await update.message.reply_text(
+        # Se viene da un callback, usiamo edit_message_text, altrimenti reply_text
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
                 message, 
                 reply_markup=get_quiz_keyboard(),
                 parse_mode=ParseMode.MARKDOWN
             )
         else:
-            await update.message.reply_text("Errore: Nessun personaggio disponibile nel database.")
+            await update.message.reply_text(
+                f"🎉 **Benvenuto nel quiz randomico!**\n\n{message}", 
+                reply_markup=get_quiz_keyboard(),
+                parse_mode=ParseMode.MARKDOWN
+            )
+    else:
+        # Se viene da un callback o un messaggio, rispondiamo in modo appropriato
+        responder = update.callback_query if update.callback_query else update.message
+        await responder.reply_text("Errore: Nessun personaggio disponibile nel file CSV.")
 
-    finally:
-        session.close()
 
 async def button_callback_handler(update: Update, context):
-    """Gestisce la pressione dei pulsanti Inline (la risposta dell'utente)."""
+    """Gestisce la pressione di tutti i pulsanti Inline."""
     query = update.callback_query
-    await query.answer()  # Risponde alla query per rimuovere lo stato di caricamento
+    await query.answer()
 
-    user_guess = query.data
-    chat_id = query.message.chat_id
+    action = query.data
     
-    session = SessionLocal()
-    try:
-        # Recupera lo stato del gioco odierno
-        today = date.today()
-        current_status = session.query(GameStatus).filter(GameStatus.game_date == today).first()
+    if action == "PLAY_AGAIN":
+        await start_and_play(update, context)
+        return
+    
+    if action == "STOP_GAME":
+        await query.edit_message_text("Grazie per aver giocato! Ciao! 👋")
+        return
         
-        if not current_status:
-            await query.edit_message_text("Il quiz del giorno non è ancora iniziato!")
-            return
-
-        current_char = session.query(Character).filter(Character.id == current_status.current_char_id).first()
+    # --- Gestione della Risposta al Quiz (GENIUS, MASON, BOTH, COMMON) ---
+    user_guess = action
+    
+    current_char = context.user_data.get(CURRENT_CHAR_KEY)
+    
+    if not current_char:
+        await query.edit_message_text("Errore: Impossibile recuperare il personaggio corrente. Riprova con /start.")
+        return
         
-        if not current_char:
-            await query.edit_message_text("Errore nel recupero del personaggio.")
-            return
-
-        # Verifica la risposta
-        correct_answer = current_char.category
-        
-        if user_guess == correct_answer:
-            result_message = (
-                f"✅ **Corretto!**\n"
-                f"Hai indovinato! **{current_char.name}** era effettivamente un **{correct_answer.capitalize()}**."
-            )
-        else:
-            result_message = (
-                f"❌ **Sbagliato!**\n"
-                f"Hai risposto: _{user_guess.capitalize()}_\n"
-                f"La risposta corretta era: **{correct_answer.capitalize()}**.\n\n"
-                f"Il personaggio era: **{current_char.name}**."
-            )
-            
-        # Modifica il messaggio con la risposta (e rimuove i pulsanti)
-        await query.edit_message_text(
-            result_message,
-            parse_mode=ParseMode.MARKDOWN
+    # Verifica la risposta
+    correct_answer = current_char['Categoria']
+    char_name = current_char['Nome']
+    
+    if user_guess == correct_answer:
+        result_message = (
+            f"✅ **Corretto!**\n"
+            f"Hai indovinato! **{char_name}** era effettivamente un **{correct_answer.capitalize()}**."
         )
+    else:
+        result_message = (
+            f"❌ **Sbagliato!**\n"
+            f"Hai risposto: _{user_guess.capitalize()}_\n"
+            f"La risposta corretta era: **{correct_answer.capitalize()}**.\n\n"
+            f"Il personaggio era: **{char_name}**."
+        )
+        
+    # Risposta finale e opzione per continuare
+    await query.edit_message_text(
+        result_message,
+        reply_markup=get_post_guess_keyboard(),
+        parse_mode=ParseMode.MARKDOWN
+    )
+    # Rimuovi il personaggio dal contesto dopo la risposta
+    context.user_data.pop(CURRENT_CHAR_KEY, None)
 
-    finally:
-        session.close()
 
-# --- 4. CONFIGURAZIONE FASTAPI ---
+# --- CONFIGURAZIONE FASTAPI E WEBHOOK ---
 
 app = FastAPI()
+# Aggiungiamo 'context_types' per usare context.user_data
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 bot = application.bot
 
 # Aggiunge i gestori (handlers)
-application.add_handler(CommandHandler("start", start_command))
+application.add_handler(CommandHandler("start", start_and_play))
 application.add_handler(CallbackQueryHandler(button_callback_handler))
-
-# --- 5. ENDPOINT E LOGICA DI AVVIO ---
 
 @app.on_event("startup")
 async def startup_event():
-    """Eseguito all'avvio del server: imposta il Webhook e il DB."""
+    """Eseguito all'avvio del server: imposta il Webhook."""
     logger.info("Avvio del server...")
     
-    # 1. Inizializza il database
-    try:
-        db = SessionLocal()
-        init_db(db)
-        logger.info("Database inizializzato o verificato.")
-    except Exception as e:
-        logger.error(f"Errore nell'inizializzazione del DB: {e}")
-
-    # 2. Imposta il Webhook su Telegram
     full_webhook_url = f"{WEBHOOK_URL_BASE}{WEBHOOK_PATH}"
     logger.info(f"Tentativo di impostare il Webhook su: {full_webhook_url}")
     
-    await bot.delete_webhook() # Rimuove vecchi webhook
+    await bot.delete_webhook()
     
     success = await bot.set_webhook(url=full_webhook_url)
     
@@ -247,18 +198,14 @@ async def startup_event():
     else:
         logger.error("Impostazione del Webhook fallita.")
 
-
 @app.get("/")
 def read_root():
-    """Endpoint di salute: controlla se il server è vivo."""
     return {"status": "ok", "message": "Bot Server is Running"}
-
 
 @app.post(WEBHOOK_PATH)
 async def telegram_webhook(request: Request):
     """Endpoint principale che riceve gli aggiornamenti da Telegram."""
     try:
-        # Ottieni i dati JSON e li passa all'Application PTB
         update_json = await request.json()
         update = Update.de_json(update_json, bot)
         await application.process_update(update)
@@ -267,8 +214,4 @@ async def telegram_webhook(request: Request):
         
     except Exception as e:
         logger.error(f"Errore nell'elaborazione dell'update: {e}")
-        # Deve sempre restituire 200 a Telegram
         return {"message": "Internal Server Error, but acknowledged"}
-
-# La parte finale per l'esecuzione diretta con uvicorn non è più necessaria
-# perché Render/Gunicorn usa il comando di avvio esterno.
