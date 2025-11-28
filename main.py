@@ -56,26 +56,26 @@ def select_random_character(context):
     return char
 
 def format_category_name(category_key):
-    """Formatta la chiave interna italiana per la visualizzazione nei messaggi di errore."""
+    """Mappa le chiavi interne (COMUNE, GENIO) in testo formattato in italiano per l'utente."""
+    # Le chiavi in input devono essere pulite (e.g., "COMUNE")
     mapping = {
         "GENIO": "Genio",
         "MASSONE": "Massone",
         "ENTRAMBI": "Genio e Massone",
         "COMUNE": "Persona Comune"
     }
-    # Restituisce il valore formattato, o la chiave se non trovata
-    return mapping.get(category_key, category_key)
+    # Assicura che la chiave sia in maiuscolo prima della traduzione
+    return mapping.get(category_key.strip().upper(), category_key)
 
-# FUNZIONE AGGIORNATA: Legge direttamente il campo Bio completo dal CSV
 def get_bio_explanation(current_char):
-    """Restituisce il contenuto del campo 'Bio' che contiene già la spiegazione completa e formattata."""
-    return current_char.get('Bio', '**Errore**: Informazioni biografiche non disponibili.')
+    """Restituisce il contenuto del campo 'Bio' che contiene la spiegazione completa e formattata."""
+    return current_char.get('Bio', '**Errore**: Informazioni biografiche non disponibili nel CSV.')
 
 
 # --- GESTORI TELEGRAM (HANDLERS) ---
 
 def get_quiz_keyboard():
-    """Restituisce la tastiera inline con le opzioni di risposta."""
+    """Definisce la tastiera con callback_data pulite (GENIO, COMUNE, etc.)."""
     keyboard = [
         [
             InlineKeyboardButton("Genio 🧠", callback_data="GENIO"),
@@ -83,7 +83,8 @@ def get_quiz_keyboard():
         ],
         [
             InlineKeyboardButton("Entrambi 👑", callback_data="ENTRAMBI"),
-            InlineKeyboardButton("Persona Comune 🚶", callback_data="COMUNE")
+            # La callback_data è la chiave interna pulita che corrisponde al CSV
+            InlineKeyboardButton("Persona Comune 🚶", callback_data="COMUNE") 
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -129,7 +130,7 @@ async def start_and_play(update: Update, context):
 
 
 async def button_callback_handler(update: Update, context):
-    """Gestisce la pressione di tutti i pulsanti Inline."""
+    """Gestisce la pressione di tutti i pulsanti Inline e verifica la risposta."""
     query = update.callback_query
     await query.answer()
 
@@ -145,7 +146,6 @@ async def button_callback_handler(update: Update, context):
         return
         
     # --- Gestione della Risposta al Quiz ---
-    user_guess = action
     
     current_char = context.user_data.get(CURRENT_CHAR_KEY)
     
@@ -153,15 +153,23 @@ async def button_callback_handler(update: Update, context):
         await query.edit_message_text("Sessione scaduta. Riprova con /start.")
         return
         
-    # Verifica la risposta
-    correct_answer = current_char['Categoria']
-    user_guess_it = format_category_name(user_guess)
+    # **LOGICA DI CONFRONTO ROBUSTA:**
+    # Normalizziamo la risposta del pulsante (COMUNE, GENIO, ecc.)
+    user_guess = action.strip().upper() 
     
-    # 1. Ottiene la spiegazione biografica completa DALLA COLONNA UNICA "Bio"
+    # Normalizziamo la Categoria dal CSV (per eliminare spazi o formattazioni errate)
+    correct_answer = str(current_char['Categoria']).strip().upper()
+    
+    # Confronto
+    esito_corretto = (user_guess == correct_answer)
+
+    # Variabili per i messaggi di output
+    user_guess_it = format_category_name(user_guess)
+    correct_answer_it = format_category_name(correct_answer)
     bio_explanation_full = get_bio_explanation(current_char)
 
-    # 2. Messaggio di ESITO (Corretto/Sbagliato)
-    if user_guess == correct_answer:
+    # 4. Costruzione del messaggio di ESITO
+    if esito_corretto:
         result_message = (
             f"✅ **Corretto!** Hai indovinato!\n\n"
             f"{bio_explanation_full}"
@@ -169,7 +177,7 @@ async def button_callback_handler(update: Update, context):
     else:
         result_message = (
             f"❌ **Sbagliato!** Hai risposto: _{user_guess_it}_\n\n"
-            f"La risposta corretta ({format_category_name(correct_answer)}) è:\n"
+            f"La risposta corretta ({correct_answer_it}) è:\n"
             f"{bio_explanation_full}"
         )
         
