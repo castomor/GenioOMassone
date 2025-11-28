@@ -61,40 +61,30 @@ def format_category_name(category_key):
     }
     return mapping.get(category_key.strip().upper(), category_key)
 
-# NUOVA FUNZIONE: Estrae la BIO formattata dal CSV e rimuove l'introduzione per evitare ripetizioni.
 def get_bio_explanation_cleaned(current_char):
     """Estrae la spiegazione biografica e rimuove la frase iniziale (es. 'È un Genio. Precisamente:')."""
-    full_bio_text = current_char.get('Bio', 'Informazioni non disponibili.')
+    full_bio_text = current_char.get('Bio', 'Informazioni non disponibili.').strip()
+    correct_category_key = str(current_char.get('Categoria', '')).strip().upper()
+    correct_category_name = format_category_name(correct_category_key)
     
-    # Tentiamo di rimuovere la parte introduttiva generica che abbiamo usato per creare il CSV.
-    # Esempi di frasi da rimuovere:
-    # 1. 'È un **Genio**. Precisamente: '
-    # 2. 'È un **Massone**. Precisamente: '
-    # 3. 'È un **Genio e Massone**.'
-    # 4. 'Chiara Cavalieri è una **Persona Comune**, proprio come te. (Non ha particolari meriti noti come genio o affiliazioni massoniche).'
+    # Pattern 1: GENIO o MASSONE (puri)
+    intro_pattern_1 = f"È un **{correct_category_name}**. Precisamente:"
+    
+    # Pattern 2: ENTRAMBI (CORREZIONE DEL BUG: si focalizza sulla frase di Genio e Massone)
+    intro_pattern_2 = "È un **Genio e Massone**. Infatti," 
+    
+    # Pattern 3: COMUNE (lasciamo la bio completa, è già la spiegazione)
+    if correct_category_key == "COMUNE" or "Persona Comune" in full_bio_text:
+        return full_bio_text 
 
-    # 1. Caso Persona Comune (testo specifico e lungo)
-    if "Persona Comune" in full_bio_text:
-        return full_bio_text
-    
-    # 2. Rimuove le frasi introduttive della categoria (e.g., 'È un **Genio**. Precisamente: ')
-    parts_to_remove = [
-        "È un **GENIO**. Precisamente:",
-        "È un **MASSONE**. Precisamente:",
-        "È un **ENTRAMBI**. Infatti, oltre a essere un genio per",
-    ]
-    
-    # Pulizia
-    for part in parts_to_remove:
-        # Usa .replace() per rimuovere la frase che contiene la ripetizione
-        if full_bio_text.startswith(part):
-            # Per ENTRAMBI, vogliamo tutta la spiegazione biografica complessa
-            if "ENTRAMBI" in part:
-                 return full_bio_text
-            # Per GENIO/MASSONE puri, togliamo l'introduzione
-            return full_bio_text.replace(part, "").strip() 
-    
-    # Se fallisce la pulizia, restituisce il testo originale.
+    # Rimuovi Pattern 1 (copre Genio e Massone puri)
+    if full_bio_text.startswith(intro_pattern_1):
+        return full_bio_text.replace(intro_pattern_1, "").strip()
+
+    # Rimuovi Pattern 2 (copre Entrambi)
+    if correct_category_key == "ENTRAMBI" and full_bio_text.startswith(intro_pattern_2):
+        return full_bio_text.replace(intro_pattern_2, "").strip()
+        
     return full_bio_text
 
 # --- GESTORI TELEGRAM (HANDLERS) ---
@@ -203,7 +193,7 @@ async def button_callback_handler(update: Update, context):
             f"{bio_explanation_body}"
         )
     else:
-        # CASO SBAGLIATO (FIX: Formato richiesto senza la ridondanza)
+        # CASO SBAGLIATO
         result_message = (
             f"❌ **Sbagliato!** Hai risposto: _{user_guess_it}_\n\n"
             f"La risposta corretta è: **{correct_answer_it}**.\n\n"
